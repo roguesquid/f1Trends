@@ -8,25 +8,8 @@ const bearerTokens = [
 ];
 const listaDeUsuarios = [
   { usuario: 'FastestPitStop', id: '1543874015206559747' },
-  { usuario: 'F1', id: '69008563' },
-  { usuario: 'SkySportsF1', id: '368276033' },
-  { usuario: 'Autosport', id: '20517081' },
-  { usuario: 'RaceFansDotNet', id: '13382652' },
-  { usuario: 'Planet_F1', id: '23076265' },
-  { usuario: 'leclercsletters', id: '1490170607354490881' },
-  { usuario: 'ricnorrisf1', id: '1296464661412548610' },
-  { usuario: 'RBR_Daily', id: '1426933808922730498' },
-  { usuario: 'Aperta', id: '2335310932' },
-  { usuario: 'FormuIaMax', id: '836637872' },
-  { usuario: 'TracingInsights', id: '1503789937245581315' },
-  { usuario: 'WeAreTheRace', id: '1214181376536141830' },
-  { usuario: 'F1ToRuleThemAll', id: '1430636365360898052' },
-  { usuario: 'Hawk9248', id: '769701355' },
-  { usuario: 'EdSpencer99', id: '3363093136' },
-  { usuario: 'pitpassdotcom', id: '174203958' },
-  { usuario: 'AndrewBensonf1', id: '58444150' },
-  { usuario: 'F1BigData', id: '1685980942223937537' },
-  { usuario: 'verstappenews', id: '1593273392983056387' }
+  { usuario: 'F1', id: '69008563' }
+  // ...otros usuarios comentados
 ];
 
 let currentTokenIndex = 0;
@@ -46,25 +29,36 @@ async function hacerPeticionX(endpoint, method = 'GET', body = null, params = {}
     'Authorization': `Bearer ${currentToken}`,
   };
 
-  const axiosConfig = {
-    method: method,
-    url: url,
-    headers: headers,
-    params: method === 'GET' ? params : undefined,
-    data: body ? JSON.stringify(body) : undefined,
-  };
+  let fullUrl = url;
+  if (method === 'GET' && Object.keys(params).length > 0) {
+    const queryParams = new URLSearchParams(params);
+    fullUrl = `${url}?${queryParams}`;
+  }
 
   try {
-    const response = await axios(axiosConfig);
+    const axiosOptions = {
+      method: method,
+      url: fullUrl,
+      headers: headers,
+      data: body ? body : undefined,
+      // 'params' is handled above via URLSearchParams for consistency with original code
+    };
 
+    if (body && method !== 'GET') {
+      axiosOptions.headers['Content-Type'] = 'application/json';
+    }
+
+    const response = await axios(axiosOptions);
     return response.data;
   } catch (error) {
+    // Axios error handling
     if (error.response) {
-      const { status, data, headers } = error.response;
-      console.error(`Error en la petición a ${endpoint} (Token Index: ${currentTokenIndex - 1}):`, data);
+      const status = error.response.status;
+      const errorData = error.response.data;
+      console.error(`Error en la petición a ${endpoint} (Token Index: ${currentTokenIndex - 1}):`, errorData);
 
       if (status === 429 && retryCount < maxRetries) {
-        const retryAfter = headers['retry-after'];
+        const retryAfter = error.response.headers['retry-after'];
         let delay = Math.pow(2, retryCount) * 1000; // Espera exponencial por defecto
         if (retryAfter) {
           delay = parseInt(retryAfter) * 1000;
@@ -76,7 +70,7 @@ async function hacerPeticionX(endpoint, method = 'GET', body = null, params = {}
         return hacerPeticionX(endpoint, method, body, params, retryCount + 1, maxRetries);
       }
 
-      throw new Error(`HTTP error! status: ${status} - ${JSON.stringify(data)}`);
+      throw new Error(`HTTP error! status: ${status} - ${JSON.stringify(errorData)}`);
     } else {
       console.error('Error al realizar la petición:', error.message);
       throw error;
@@ -84,19 +78,45 @@ async function hacerPeticionX(endpoint, method = 'GET', body = null, params = {}
   }
 }
 
-export async function obtenerTweetsPorKeywords(keywords, cantidad) {
+async function obtenerTweetsPorKeywords(userIds, keywords, cantidadPorUsuario) {
   const endpoint = 'tweets/search/recent';
-  const query = keywords.map(keyword => `"${keyword}"`).join(' OR ');
-  const params = {
-    query: query,
-    max_results: Math.min(cantidad, 100),
-  };
+  const allTweets = [];
 
-  try {
-    const responseData = await hacerPeticionX(endpoint, 'GET', null, params);
-    return responseData && responseData.data ? responseData.data : [];
-  } catch (error) {
-    console.error('Error al obtener tweets por keywords:', error);
-    return [];
+  for (const userId of userIds) {
+    const query = `from:${userId} (${keywords.map(keyword => `"${keyword}"`).join(' OR ')})`;
+    const params = {
+      query: query,
+      max_results: Math.min(cantidadPorUsuario, 100),
+    };
+
+    try {
+      const responseData = await hacerPeticionX(endpoint, 'GET', null, params);
+      if (responseData && responseData.data) {
+        allTweets.push(...responseData.data);
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } catch (error) {
+      console.error(`Error al obtener tweets del usuario ${userId}:`, error);
+    }
+    if (allTweets.length >= cantidadPorUsuario * userIds.length) {
+      break;
+    }
   }
+
+  return allTweets;
 }
+
+const palabrasClaveFormula1 = ["formulaone", "formula one", "championship", "pitstop", "verstappen", "max verstappen", "perez", "sergio perez", "checo",
+  "leclerc", "charles leclerc", "sainz", "carlos sainz", "hamilton", "lewis hamilton", "russell", "george russell",
+  "norris", "lando norris", "piastri", "oscar piastri", "alonso", "fernando alonso", "stroll", "lance stroll"];
+const cantidadDeTweetsPorUsuario = 10;
+const listaDeUserIds = listaDeUsuarios.map(user => user.id);
+
+export {
+  hacerPeticionX,
+  obtenerTweetsPorKeywords,
+  palabrasClaveFormula1,
+  cantidadDeTweetsPorUsuario,
+  listaDeUserIds,
+  listaDeUsuarios
+};
